@@ -218,6 +218,8 @@ const toCleanAlpha = (value) =>
     .toUpperCase()
     .replace(/[^A-Z]/g, '')
 
+const char_index = (ch) => ALPHA.indexOf(ch)
+
 const mod = (n, m) => ((n % m) + m) % m
 
 const chunkPairs = (text) => {
@@ -243,31 +245,6 @@ const preparePlayfairText = (text) => {
   }
   if (result.length % 2 !== 0) result.push('X')
   return result.join('')
-}
-
-const parseStep = (step) => {
-  const text = String(step || '').trim()
-  if (!text) return { label: 'Step', value: '(empty)', chips: [] }
-  let label = 'Detail'
-  let value = text
-  if (text.includes(':')) {
-    const parts = text.split(':')
-    label = parts[0].trim() || label
-    value = parts.slice(1).join(':').trim()
-  } else if (text.includes('=')) {
-    const parts = text.split('=')
-    label = parts[0].trim() || label
-    value = parts.slice(1).join('=').trim()
-  }
-  let chips = []
-  if (value.includes(' | ')) {
-    chips = value.split(' | ').map((item) => item.trim()).filter(Boolean)
-  } else if (value.includes(' -> ')) {
-    chips = value.split(' -> ').map((item) => item.trim()).filter(Boolean)
-  } else if (value.includes(',') && value.split(',').length <= 8) {
-    chips = value.split(',').map((item) => item.trim()).filter(Boolean)
-  }
-  return { label, value, chips }
 }
 
 const getPlayfairMatrix = (key) => {
@@ -395,23 +372,48 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
     const cleaned = toCleanAlpha(inputs.text)
     const shift = mod(Number(inputs.shift || 0), 26)
     const step = inputs.mode === 'decrypt' ? mod(26 - shift, 26) : shift
-    const preview = cleaned.slice(0, 14).split('').map((ch, index) => ({
-      from: ch,
-      to: result?.output?.[index] || '',
-    }))
+    const preview = cleaned.slice(0, 14).split('').map((ch, index) => {
+      const fromIndex = char_index(ch)
+      const toIndex = mod(fromIndex + step, 26)
+      return {
+        from: ch,
+        to: result?.output?.[index] || '',
+        fromIndex,
+        toIndex,
+        calculation: `(${fromIndex} + ${step}) mod 26 = ${toIndex}`
+      }
+    })
     return (
       <div className="viz-card">
-        <p className="output-title">Visualization</p>
-        <div className="viz-row">
-          <span>Shift</span>
-          <strong>{step}</strong>
+        <p className="output-title">Step-by-Step Visualization</p>
+        <div className="viz-step-header">
+          <span className="viz-step-badge">{inputs.mode === 'encrypt' ? 'Encryption' : 'Decryption'}</span>
+          <div className="viz-progress">
+            <div className="viz-progress-bar" style={{ width: '100%' }}></div>
+          </div>
         </div>
+        <div className="viz-row viz-animated" style={{ '--i': 0 }}>
+          <span>Shift Amount</span>
+          <strong className="viz-highlight">{step} positions</strong>
+        </div>
+        <div className="viz-alphabet">
+          {ALPHA.split('').map((letter, idx) => (
+            <span 
+              key={`alpha-${idx}`} 
+              className={`viz-alpha-cell ${preview.some(p => p.fromIndex === idx || p.toIndex === idx) ? 'highlighted' : ''}`}
+            >
+              {letter}
+            </span>
+          ))}
+        </div>
+        <p className="viz-section-title">Character Transformations:</p>
         <div className="viz-pairs">
           {preview.length ? preview.map((pair, index) => (
-            <div key={`caesar-${index}`} className="viz-chip">
-              <span>{pair.from}</span>
-              <span className="viz-arrow">→</span>
-              <span>{pair.to}</span>
+            <div key={`caesar-${index}`} className="viz-chip animated step-detail" style={{ '--i': index }}>
+              <span className="viz-char-box">{pair.from}</span>
+              <span className="viz-calculation">{pair.calculation}</span>
+              <span className="viz-arrow animated">→</span>
+              <span className="viz-char-box highlight">{pair.to}</span>
             </div>
           )) : <span className="viz-muted">No input yet.</span>}
         </div>
@@ -426,20 +428,66 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
       .split('')
       .map((_, i) => keyClean[i % (keyClean.length || 1)] || '')
       .join('')
+    
+    const steps = cleaned.slice(0, 10).split('').map((ch, i) => {
+      const keyChar = keyStream[i] || ''
+      const textIndex = char_index(ch)
+      const keyIndex = char_index(keyChar)
+      const shift = inputs.mode === 'decrypt' ? mod(26 - keyIndex, 26) : keyIndex
+      const resultIndex = mod(textIndex + shift, 26)
+      const resultChar = result?.output?.[i] || ''
+      return {
+        position: i + 1,
+        textChar: ch,
+        textIndex,
+        keyChar,
+        keyIndex,
+        operation: inputs.mode === 'decrypt' 
+          ? `(${textIndex} - ${keyIndex}) mod 26 = ${resultIndex}`
+          : `(${textIndex} + ${keyIndex}) mod 26 = ${resultIndex}`,
+        resultChar,
+        resultIndex
+      }
+    })
+
     return (
       <div className="viz-card">
-        <p className="output-title">Visualization</p>
-        <div className="viz-aligned">
-          <span className="viz-label">Text</span>
-          <span>{cleaned || '(empty)'}</span>
+        <p className="output-title">Step-by-Step Visualization</p>
+        <div className="viz-step-header">
+          <span className="viz-step-badge">{inputs.mode === 'encrypt' ? 'Encryption' : 'Decryption'}</span>
+          <div className="viz-progress">
+            <div className="viz-progress-bar" style={{ width: '100%' }}></div>
+          </div>
         </div>
-        <div className="viz-aligned">
-          <span className="viz-label">Key</span>
-          <span>{keyStream || '(empty)'}</span>
+        <div className="viz-aligned viz-animated" style={{ '--i': 0 }}>
+          <span className="viz-label">Plaintext</span>
+          <span className="viz-text-display">{cleaned || '(empty)'}</span>
         </div>
-        <div className="viz-aligned">
-          <span className="viz-label">Out</span>
-          <span>{result?.output || '(empty)'}</span>
+        <div className="viz-aligned viz-animated" style={{ '--i': 1 }}>
+          <span className="viz-label">Key Stream</span>
+          <span className="viz-text-display">{keyStream || '(empty)'}</span>
+        </div>
+        <div className="viz-aligned viz-animated" style={{ '--i': 2 }}>
+          <span className="viz-label">Ciphertext</span>
+          <span className="viz-text-display highlight">{result?.output || '(empty)'}</span>
+        </div>
+        <p className="viz-section-title">Position-by-Position Calculation:</p>
+        <div className="viz-steps-grid">
+          {steps.map((step, index) => (
+            <div key={`vig-${index}`} className="viz-step-box animated" style={{ '--i': index }}>
+              <div className="viz-step-num">#{step.position}</div>
+              <div className="viz-step-content">
+                <div className="viz-step-row">
+                  <span className="viz-char-box">{step.textChar}</span>
+                  <span className="viz-operator">{inputs.mode === 'decrypt' ? '-' : '+'}</span>
+                  <span className="viz-char-box">{step.keyChar}</span>
+                  <span className="viz-arrow animated">→</span>
+                  <span className="viz-char-box highlight">{step.resultChar}</span>
+                </div>
+                <div className="viz-calculation-text">{step.operation}</div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     )
@@ -451,20 +499,45 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
       ? toCleanAlpha(inputs.text).replace(/J/g, 'I')
       : preparePlayfairText(inputs.text)
     const pairs = chunkPairs(prepared)
+    const outputPairs = chunkPairs(result?.output || '')
+    
     return (
       <div className="viz-card">
-        <p className="output-title">Visualization</p>
-        <div className="viz-grid">
+        <p className="output-title">Step-by-Step Visualization</p>
+        <div className="viz-step-header">
+          <span className="viz-step-badge">5×5 Key Matrix</span>
+          <div className="viz-progress">
+            <div className="viz-progress-bar" style={{ width: '100%' }}></div>
+          </div>
+        </div>
+        <p className="viz-section-title">Playfair Matrix (J → I):</p>
+        <div className="viz-grid playfair-grid">
           {matrix.flat().map((cell, index) => (
-            <span key={`pf-${index}`}>{cell}</span>
+            <span key={`pf-${index}`} className="animated" style={{ '--i': index }}>{cell}</span>
           ))}
         </div>
-        <div className="viz-pairs">
-          {pairs.map((pair, index) => (
-            <div key={`pf-pair-${index}`} className="viz-chip">
-              {pair}
-            </div>
-          ))}
+        <p className="viz-section-title">Digraph Processing:</p>
+        <div className="viz-steps-grid">
+          {pairs.slice(0, 8).map((pair, index) => {
+            const output = outputPairs[index] || '??'
+            return (
+              <div key={`pf-pair-${index}`} className="viz-step-box animated" style={{ '--i': index }}>
+                <div className="viz-step-num">Pair {index + 1}</div>
+                <div className="viz-step-content">
+                  <div className="viz-step-row">
+                    <span className="viz-char-box">{pair[0]}</span>
+                    <span className="viz-char-box">{pair[1]}</span>
+                    <span className="viz-arrow animated">→</span>
+                    <span className="viz-char-box highlight">{output[0]}</span>
+                    <span className="viz-char-box highlight">{output[1]}</span>
+                  </div>
+                  <div className="viz-calculation-text">
+                    {pair === output ? 'No change' : 'Matrix lookup applied'}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
     )
@@ -475,25 +548,53 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
     const cleaned = toCleanAlpha(inputs.text)
     const pairs = chunkPairs(cleaned.length % 2 === 0 ? cleaned : `${cleaned}X`)
     const outPairs = chunkPairs(result?.output || '')
+    
     return (
       <div className="viz-card">
-        <p className="output-title">Visualization</p>
-        <div className="viz-matrix">
-          <div>
-            <span>{keyMatrix ? keyMatrix[0] : '-'}</span>
-            <span>{keyMatrix ? keyMatrix[1] : '-'}</span>
-          </div>
-          <div>
-            <span>{keyMatrix ? keyMatrix[2] : '-'}</span>
-            <span>{keyMatrix ? keyMatrix[3] : '-'}</span>
+        <p className="output-title">Step-by-Step Visualization</p>
+        <div className="viz-step-header">
+          <span className="viz-step-badge">2×2 Matrix Cipher</span>
+          <div className="viz-progress">
+            <div className="viz-progress-bar" style={{ width: '100%' }}></div>
           </div>
         </div>
-        <div className="viz-pairs">
-          {pairs.map((pair, index) => (
-            <div key={`hill-${index}`} className="viz-chip">
-              {pair} → {outPairs[index] || ''}
-            </div>
-          ))}
+        <p className="viz-section-title">Key Matrix:</p>
+        <div className="viz-matrix hill-matrix">
+          <div>
+            <span className="animated" style={{ '--i': 0 }}>{keyMatrix ? keyMatrix[0] : '-'}</span>
+            <span className="animated" style={{ '--i': 1 }}>{keyMatrix ? keyMatrix[1] : '-'}</span>
+          </div>
+          <div>
+            <span className="animated" style={{ '--i': 2 }}>{keyMatrix ? keyMatrix[2] : '-'}</span>
+            <span className="animated" style={{ '--i': 3 }}>{keyMatrix ? keyMatrix[3] : '-'}</span>
+          </div>
+        </div>
+        <p className="viz-section-title">Matrix Multiplication (mod 26):</p>
+        <div className="viz-steps-grid">
+          {pairs.slice(0, 6).map((pair, index) => {
+            const output = outPairs[index] || '??'
+            const v0 = char_index(pair[0])
+            const v1 = char_index(pair[1])
+            const calculation = keyMatrix ? 
+              `[${keyMatrix[0]}·${v0}+${keyMatrix[1]}·${v1}, ${keyMatrix[2]}·${v0}+${keyMatrix[3]}·${v1}]` 
+              : 'N/A'
+            return (
+              <div key={`hill-${index}`} className="viz-step-box animated" style={{ '--i': index }}>
+                <div className="viz-step-num">Pair {index + 1}</div>
+                <div className="viz-step-content">
+                  <div className="viz-step-row">
+                    <span className="viz-char-box">{pair[0]}</span>
+                    <span className="viz-char-box">{pair[1]}</span>
+                    <span className="viz-calculation-text small">({v0}, {v1})</span>
+                    <span className="viz-arrow animated">→</span>
+                    <span className="viz-char-box highlight">{output[0]}</span>
+                    <span className="viz-char-box highlight">{output[1]}</span>
+                  </div>
+                  <div className="viz-calculation-text">{calculation}</div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
     )
@@ -504,21 +605,36 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
       const gridData = buildColumnarGrid(inputs.text, inputs.key)
       return (
         <div className="viz-card">
-          <p className="output-title">Visualization</p>
+          <p className="output-title">Step-by-Step Visualization</p>
+          <div className="viz-step-header">
+            <span className="viz-step-badge">Columnar Transposition</span>
+            <div className="viz-progress">
+              <div className="viz-progress-bar" style={{ width: '100%' }}></div>
+            </div>
+          </div>
           {gridData ? (
             <>
+              <p className="viz-section-title">Step 1: Key Columns</p>
               <div className="viz-key">
                 {gridData.keyClean.split('').map((ch, index) => (
-                  <span key={`key-${index}`}>{ch}</span>
+                  <span key={`key-${index}`} className="animated" style={{ '--i': index }}>{ch}</span>
                 ))}
               </div>
+              <p className="viz-section-title">Step 2: Fill Grid</p>
               <div className="viz-grid">
                 {gridData.grid.flat().map((cell, index) => (
-                  <span key={`cg-${index}`}>{cell}</span>
+                  <span key={`cg-${index}`} className="animated" style={{ '--i': index }}>{cell}</span>
                 ))}
               </div>
-              <div className="viz-order">
-                Order: {gridData.order.map((o) => o.ch).join('')}
+              <p className="viz-section-title">Step 3: Column Order (alphabetically)</p>
+              <div className="viz-order viz-animated" style={{ '--i': gridData.grid.flat().length }}>
+                <div className="viz-step-box">
+                  <div className="viz-step-content">
+                    <div className="viz-calculation-text">
+                      Read columns in order: {gridData.order.map((o) => o.ch).join(' → ')}
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
           ) : (
@@ -528,15 +644,25 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
       )
     }
     const railGrid = buildRailFenceGrid(inputs.text, inputs.rails)
+    const railCount = Number(inputs.rails) || 3
     return (
       <div className="viz-card">
-        <p className="output-title">Visualization</p>
+        <p className="output-title">Step-by-Step Visualization</p>
+        <div className="viz-step-header">
+          <span className="viz-step-badge">Rail Fence ({railCount} rails)</span>
+          <div className="viz-progress">
+            <div className="viz-progress-bar" style={{ width: '100%' }}></div>
+          </div>
+        </div>
+        <p className="viz-section-title">Zigzag Pattern:</p>
         {railGrid.length ? (
           <div className="viz-rail">
             {railGrid.map((row, rowIndex) => (
-              <div key={`rail-${rowIndex}`}>
+              <div key={`rail-${rowIndex}`} className="viz-animated" style={{ '--i': rowIndex }}>
                 {row.map((cell, index) => (
-                  <span key={`rail-${rowIndex}-${index}`}>{cell || '·'}</span>
+                  <span key={`rail-${rowIndex}-${index}`} className={cell ? 'filled' : 'empty'}>
+                    {cell || '·'}
+                  </span>
                 ))}
               </div>
             ))}
@@ -544,6 +670,10 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
         ) : (
           <p className="viz-muted">Provide text and rails to see the pattern.</p>
         )}
+        <p className="viz-section-title">Reading Order:</p>
+        <div className="viz-calculation-text">
+          Read row by row: Rail 1 → Rail 2 → ... → Rail {railCount}
+        </div>
       </div>
     )
   }
@@ -563,20 +693,54 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
         }
       })
       .filter(Boolean)
+    
+    const startStep = (result?.steps || []).find(s => s.startsWith('Start'))
+    const outputStep = (result?.steps || []).find(s => s.startsWith('Output'))
+    
     return (
       <div className="viz-card">
-        <p className="output-title">Visualization</p>
+        <p className="output-title">Step-by-Step Visualization</p>
+        <div className="viz-step-header">
+          <span className="viz-step-badge">Feistel Structure</span>
+          <div className="viz-progress">
+            <div className="viz-progress-bar" style={{ width: '100%' }}></div>
+          </div>
+        </div>
+        {startStep && (
+          <div className="viz-step-box viz-animated" style={{ '--i': 0 }}>
+            <div className="viz-step-num">Initial State</div>
+            <div className="viz-calculation-text">{startStep}</div>
+          </div>
+        )}
+        <p className="viz-section-title">Round Transformations:</p>
         <div className="viz-rounds">
           {rounds.map((row, index) => (
-            <div key={`des-${index}`} className="viz-round">
-              <span>R{row.round}</span>
-              <span>k {row.k}</span>
-              <span>f {row.f}</span>
-              <span>L {row.l}</span>
-              <span>R {row.r}</span>
+            <div key={`des-${index}`} className="viz-step-box animated" style={{ '--i': index + 1 }}>
+              <div className="viz-step-num">Round {row.round}</div>
+              <div className="viz-step-content">
+                <div className="viz-step-row">
+                  <div className="viz-calculation-text small">Key: {row.k}</div>
+                  <div className="viz-calculation-text small">F: {row.f}</div>
+                </div>
+                <div className="viz-step-row">
+                  <span className="viz-label">L:</span>
+                  <span className="viz-char-box">{row.l}</span>
+                  <span className="viz-label">R:</span>
+                  <span className="viz-char-box highlight">{row.r}</span>
+                </div>
+                <div className="viz-calculation-text">
+                  New L = old R, New R = old L ⊕ F(old R, k)
+                </div>
+              </div>
             </div>
           ))}
         </div>
+        {outputStep && (
+          <div className="viz-step-box viz-animated" style={{ '--i': rounds.length + 1 }}>
+            <div className="viz-step-num">Final Output</div>
+            <div className="viz-calculation-text highlight">{outputStep}</div>
+          </div>
+        )}
       </div>
     )
   }
@@ -600,19 +764,26 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
         ? 'invalid'
         : ''
     const entries = [
-      { label: 'Public key y', value: y },
-      { label: 'Hash h', value: h },
-      { label: 'Signature r', value: r },
-      { label: 'Signature s', value: s },
-      { label: 'Verify v', value: v },
+      { label: 'Step 1: Compute Public Key', field: 'y', value: y },
+      { label: 'Step 2: Hash Message', field: 'h', value: h },
+      { label: 'Step 3: Signature r', field: 'r', value: r },
+      { label: 'Step 4: Signature s', field: 's', value: s },
+      { label: 'Step 5: Verify', field: 'v', value: v },
     ].filter((entry) => entry.value !== null)
-    const signature = r && s ? `(${r}, ${s})` : ''
+    const signature = r && s ? `(r=${r}, s=${s})` : ''
+    
     return (
       <div className="viz-card">
-        <p className="output-title">Visualization</p>
-        <div className="viz-dss-banner">
+        <p className="output-title">Step-by-Step Visualization</p>
+        <div className="viz-step-header">
+          <span className="viz-step-badge">DSA Signature</span>
+          <div className="viz-progress">
+            <div className="viz-progress-bar" style={{ width: '100%' }}></div>
+          </div>
+        </div>
+        <div className="viz-dss-banner viz-animated" style={{ '--i': 0 }}>
           <div>
-            <span className="viz-label">Signature</span>
+            <span className="viz-label">Digital Signature</span>
             <div className="viz-dss-sig">{signature || result?.output || '(pending)'}</div>
           </div>
           {status ? (
@@ -621,11 +792,15 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
             </span>
           ) : null}
         </div>
+        <p className="viz-section-title">Signature Generation & Verification:</p>
         <div className="viz-list viz-dss-list">
           {entries.map((entry, index) => (
-            <div key={`dss-${index}`}>
-              <span>{entry.label}</span>
-              <strong>{entry.value}</strong>
+            <div key={`dss-${index}`} className="viz-step-box animated" style={{ '--i': index + 1 }}>
+              <div className="viz-step-num">{entry.label}</div>
+              <div className="viz-step-content">
+                <span className="viz-label">{entry.field}</span>
+                <strong className="viz-char-box highlight">{entry.value}</strong>
+              </div>
             </div>
           ))}
         </div>
@@ -636,17 +811,32 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
   if (algorithm.id === 'rsa' || algorithm.id === 'dh') {
     const entries = (result?.steps || []).map((step) => {
       const parts = step.split('=')
-      if (parts.length < 2) return { label: step, value: '' }
-      return { label: parts[0].trim(), value: parts.slice(1).join('=').trim() }
+      if (parts.length < 2) return { label: step, value: '', isHeader: true }
+      return { label: parts[0].trim(), value: parts.slice(1).join('=').trim(), isHeader: false }
     })
+    
+    const title = algorithm.id === 'rsa' ? 'RSA Encryption' : 'Diffie-Hellman Key Exchange'
+    
     return (
       <div className="viz-card">
-        <p className="output-title">Visualization</p>
+        <p className="output-title">Step-by-Step Visualization</p>
+        <div className="viz-step-header">
+          <span className="viz-step-badge">{title}</span>
+          <div className="viz-progress">
+            <div className="viz-progress-bar" style={{ width: '100%' }}></div>
+          </div>
+        </div>
+        <p className="viz-section-title">Computation Steps:</p>
         <div className="viz-list">
           {entries.map((entry, index) => (
-            <div key={`entry-${index}`}>
-              <span>{entry.label}</span>
-              <strong>{entry.value}</strong>
+            <div key={`entry-${index}`} className="viz-step-box animated" style={{ '--i': index }}>
+              <div className="viz-step-num">Step {index + 1}</div>
+              <div className="viz-step-content">
+                <span className="viz-label">{entry.label}</span>
+                {entry.value && (
+                  <strong className="viz-char-box highlight">{entry.value}</strong>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -657,18 +847,44 @@ const VisualizationPanel = ({ algorithm, inputs, result }) => {
   if (algorithm.id === 'md5' || algorithm.id === 'sha1') {
     const len = (inputs.text || '').length
     const blocks = Math.ceil((len + 9) / 64)
+    const hashType = algorithm.id === 'md5' ? 'MD5 (128-bit)' : 'SHA-1 (160-bit)'
+    const digestLen = algorithm.id === 'md5' ? 32 : 40
+    
     return (
       <div className="viz-card">
-        <p className="output-title">Visualization</p>
-        <div className="viz-row">
-          <span>Length</span>
-          <strong>{len} chars</strong>
+        <p className="output-title">Step-by-Step Visualization</p>
+        <div className="viz-step-header">
+          <span className="viz-step-badge">{hashType}</span>
+          <div className="viz-progress">
+            <div className="viz-progress-bar" style={{ width: '100%' }}></div>
+          </div>
         </div>
-        <div className="viz-row">
-          <span>Blocks</span>
-          <strong>{blocks} x 512-bit</strong>
+        <p className="viz-section-title">Message Processing:</p>
+        <div className="viz-step-box viz-animated" style={{ '--i': 0 }}>
+          <div className="viz-step-num">Step 1: Input</div>
+          <div className="viz-step-row">
+            <span className="viz-label">Message Length:</span>
+            <strong className="viz-highlight">{len} characters</strong>
+          </div>
         </div>
-        <div className="viz-digest">{result?.output}</div>
+        <div className="viz-step-box viz-animated" style={{ '--i': 1 }}>
+          <div className="viz-step-num">Step 2: Padding</div>
+          <div className="viz-step-row">
+            <span className="viz-label">Processed Blocks:</span>
+            <strong className="viz-highlight">{blocks} × 512-bit</strong>
+          </div>
+          <div className="viz-calculation-text">
+            Message is padded to multiple of 512 bits
+          </div>
+        </div>
+        <div className="viz-step-box viz-animated" style={{ '--i': 2 }}>
+          <div className="viz-step-num">Step 3: Hash Computation</div>
+          <div className="viz-calculation-text">
+            Processing {blocks} block(s) through {hashType} algorithm
+          </div>
+        </div>
+        <p className="viz-section-title">Final Digest ({digestLen} hex chars):</p>
+        <div className="viz-digest viz-animated" style={{ '--i': 3 }}>{result?.output}</div>
       </div>
     )
   }
@@ -685,49 +901,32 @@ const AlgorithmPanel = ({ algorithm, inputs, onChange }) => {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState('')
-  const [visibleSteps, setVisibleSteps] = useState(0)
   const copyTimer = useRef(null)
-  const revealTimer = useRef(null)
   const fieldCount = algorithm.fields.length
   const outputText = result?.error ? result.error : result?.output || ''
-  const stepsText = result?.steps ? result.steps.join('\n') : ''
 
   useEffect(
     () => () => {
       clearTimeout(copyTimer.current)
-      clearInterval(revealTimer.current)
     },
     []
   )
 
   useEffect(() => {
-    clearInterval(revealTimer.current)
-    if (loading || !result?.steps?.length) {
-      setVisibleSteps(0)
-      return
-    }
-    setVisibleSteps(0)
-    let index = 0
-    revealTimer.current = setInterval(() => {
-      index += 1
-      setVisibleSteps(index)
-      if (index >= result.steps.length) {
-        clearInterval(revealTimer.current)
-      }
-    }, 200)
-    return () => clearInterval(revealTimer.current)
-  }, [loading, result?.steps])
-
-  useEffect(() => {
     const controller = new AbortController()
-    setLoading(true)
-    runAlgorithm(algorithm.id, inputs, controller.signal)
-      .then((data) => setResult(data))
-      .catch((err) => {
+    const fetchData = async () => {
+      setLoading(true)
+      try {
+        const data = await runAlgorithm(algorithm.id, inputs, controller.signal)
+        setResult(data)
+      } catch (err) {
         if (err?.name === 'AbortError') return
         setResult({ error: err?.message || 'Failed to run the algorithm.' })
-      })
-      .finally(() => setLoading(false))
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
     return () => controller.abort()
   }, [algorithm.id, inputs])
 
@@ -767,74 +966,32 @@ const AlgorithmPanel = ({ algorithm, inputs, onChange }) => {
             ))}
           </div>
         </div>
-        <div className="workspace-card result-card">
-          <div className="result-grid">
-            <div className="output-card">
-              <p className="output-title">Output</p>
-              {result?.error ? (
-                <p className="output-error">{result.error}</p>
-              ) : loading ? (
-                <p className="output-muted">Running...</p>
-              ) : (
-                <p className="output-value">{result?.output || '(empty)'}</p>
-              )}
-              <div className="output-actions">
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => handleCopy('output', outputText)}
-                  disabled={!outputText}
-                >
-                  Copy output
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => handleCopy('steps', stepsText)}
-                  disabled={!stepsText}
-                >
-                  Copy steps
-                </button>
-                <span className={`copy-hint ${copied ? 'show' : ''}`}>
-                  {copied ? `${copied} copied` : ''}
-                </span>
-              </div>
-            </div>
-            <VisualizationPanel algorithm={algorithm} inputs={inputs} result={result} />
+        <div className="workspace-card output-card">
+          <p className="output-title">Output</p>
+          {result?.error ? (
+            <p className="output-error">{result.error}</p>
+          ) : loading ? (
+            <p className="output-muted">Running...</p>
+          ) : (
+            <p className="output-value">{result?.output || '(empty)'}</p>
+          )}
+          <div className="output-actions">
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => handleCopy('output', outputText)}
+              disabled={!outputText}
+            >
+              Copy output
+            </button>
+            <span className={`copy-hint ${copied ? 'show' : ''}`}>
+              {copied ? `${copied} copied` : ''}
+            </span>
           </div>
         </div>
       </div>
-      <div className="workspace-card steps-card">
-        <p className="output-title">Step-by-step</p>
-        {loading ? (
-          <p className="output-muted">Calculating steps...</p>
-        ) : result?.steps ? (
-          <ul className="steps-list">
-            {result.steps.slice(0, visibleSteps).map((step, index) => {
-              const parsed = parseStep(step)
-              const label = parsed.label === 'Detail' ? `Step ${index + 1}` : parsed.label
-              return (
-                <li key={`${algorithm.id}-step-${index}`} style={{ '--i': index }} className="step-item">
-                  <span className="step-index">{String(index + 1).padStart(2, '0')}</span>
-                  <div className="step-body">
-                    <span className="step-label">{label}</span>
-                    {parsed.chips.length > 1 ? (
-                      <div className="step-chips">
-                        {parsed.chips.map((chip, chipIndex) => (
-                          <span key={`${algorithm.id}-chip-${index}-${chipIndex}`}>{chip}</span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="step-value">{parsed.value || step}</p>
-                    )}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        ) : (
-          <p className="output-muted">No steps available.</p>
-        )}
+      <div className="workspace-card viz-card-container">
+        <VisualizationPanel algorithm={algorithm} inputs={inputs} result={result} />
       </div>
     </section>
   )
@@ -984,6 +1141,18 @@ function App() {
           inputs={inputsByAlgo[activeAlgo.id]}
           onChange={handleInputChange}
         />
+        <footer className="footer">
+          <div className="footer-bottom">
+            <div className="footer-bottom-content">
+              <p className="footer-copyright">
+                © {new Date().getFullYear()} Algorithm Demonstrator. All rights reserved.
+              </p>
+              <p className="footer-creator">
+                Designed & Developed by <span className="creator-name">Divy Jain</span>
+              </p>
+            </div>
+          </div>
+        </footer>
       </main>
     </div>
   )
